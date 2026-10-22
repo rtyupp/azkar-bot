@@ -1,0 +1,53 @@
+name: azkar-bot
+
+on:
+  schedule:
+    # يعمل كل 6 ساعات لتجديد دورة الـ Polling
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      minutes:
+        description: 'مدة التشغيل بالدقائق (افتراضي 345 دقيقة)'
+        required: false
+        default: '345'
+
+concurrency:
+  group: azkar-bot-runner
+  cancel-in-progress: false
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run Azkar Bot
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+        run: |
+          MINS=${{ github.event.inputs.minutes || '345' }}
+          echo "Running Azkar Bot for $MINS minutes..."
+          timeout --signal=INT "${MINS}m" python bot.py || true
+
+      - name: Commit & Push State
+        if: always()
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add -f users_state.json || true
+          git commit -m "chore: sync azkar users state [skip ci]" || true
+          git push || true
