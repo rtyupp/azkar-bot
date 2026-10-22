@@ -5,6 +5,7 @@
 """
 import os
 import logging
+import random
 from datetime import time
 import pytz
 
@@ -19,6 +20,7 @@ from telegram.ext import (
 )
 
 from azkar_data import AZKAR_DATA, TASBEEH_PRESETS
+from duas_data import PERIODIC_DUAS
 from storage import get_user, update_user, get_all_subscribers
 from keyboards import (
     main_keyboard,
@@ -174,12 +176,13 @@ async def message_dispatcher(update: Update, context: ContextTypes.DEFAULT_TYPE)
         enabled = user.get("alerts_enabled", True)
         status_str = "مفعّلة ✅" if enabled else "معطّلة ❌"
         msg = (
-            f"🔔 <b>إعدادات التنبيهات اليومية التلقائية</b>\n"
+            f"🔔 <b>إعدادات التنبيهات والأدعية اليومية</b>\n"
             f"━━━━━━━━━━━━━━━━━━\n\n"
             f"الحالة الحالية: <b>{status_str}</b>\n\n"
             f"المواعيد المجدولة (بتوقيت مكة المكرمة):\n"
             f"🌅 تذكير أذكار الصباح: <b>06:00 صباحاً</b>\n"
-            f"🌙 تذكير أذكار المساء: <b>05:00 مساءً</b>\n\n"
+            f"🌙 تذكير أذكار المساء: <b>05:00 مساءً</b>\n"
+            f"📿 أدعية دورية: <b>كل ساعتين</b> على مدار اليوم\n\n"
             f"يمكنك التبديل عبر الزر بالأسفل:"
         )
         await update.message.reply_text(msg, reply_markup=alerts_keyboard(enabled), parse_mode=ParseMode.HTML)
@@ -374,6 +377,36 @@ async def evening_reminder(context: ContextTypes.DEFAULT_TYPE):
             logger.warning(f"Could not send evening alert to {cid}: {e}")
 
 
+async def periodic_dua_reminder(context: ContextTypes.DEFAULT_TYPE):
+    subscribers = get_all_subscribers()
+    if not subscribers:
+        return
+
+    dua = random.choice(PERIODIC_DUAS)
+    dua_text = dua["text"]
+    dua_source = dua.get("source", "")
+
+    msg = (
+        "📿 <b>تذكير بذكر الله والدعاء</b>\n"
+        "━━━━━━━━━━━━━━━━━━\n\n"
+        f"« <b>{dua_text}</b> »\n\n"
+    )
+    if dua_source:
+        msg += f"💡 <i>{dua_source}</i>\n"
+    msg += "━━━━━━━━━━━━━━━━━━\n<i>«لا يَزَالُ لِسَانُكَ رَطْباً مِنْ ذِكْرِ اللَّهِ»</i>"
+
+    for cid in subscribers:
+        try:
+            await context.bot.send_message(
+                chat_id=cid,
+                text=msg,
+                parse_mode=ParseMode.HTML,
+                reply_markup=main_keyboard()
+            )
+        except Exception as e:
+            logger.warning(f"Could not send periodic dua to {cid}: {e}")
+
+
 def main():
     token = load_token()
     if not token:
@@ -396,9 +429,13 @@ def main():
         tz = pytz.timezone("Asia/Riyadh")
         job_queue = app.job_queue
         if job_queue:
+            # 1. أذكار الصباح (06:00 صباحاً بتوقيت مكة)
             job_queue.run_daily(morning_reminder, time=time(hour=6, minute=0, tzinfo=tz))
+            # 2. أذكار المساء (05:00 مساءً بتوقيت مكة)
             job_queue.run_daily(evening_reminder, time=time(hour=17, minute=0, tzinfo=tz))
-            logger.info("Daily reminder jobs scheduled successfully (06:00 & 17:00 Riyadh time).")
+            # 3. دعاء مأثور كل ساعتين على مدار اليوم (كل 7200 ثانية)
+            job_queue.run_repeating(periodic_dua_reminder, interval=7200, first=60)
+            logger.info("All reminder jobs scheduled successfully (Morning at 06:00, Evening at 17:00, and Dua every 2 hours).")
     except Exception as e:
         logger.warning(f"Failed to schedule reminder jobs: {e}")
 
